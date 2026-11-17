@@ -4,6 +4,8 @@ import type { Pool } from 'pg';
 
 import type { IUserRepository } from './user.repository.js';
 
+import type { UpdateUserData } from './user.model.js'; 
+
 import type {
     User,
     UserRecord,
@@ -11,6 +13,12 @@ import type {
 } from './user.model.js';
 
 import { AppError } from '../../shared/errors/app-error.js';
+
+import type {
+    PaginationParams,
+    PaginationData
+} from '../../shared/pagination/pagination.model.js';
+import { count } from 'node:console';
 
 export class PostgresUserRepository
 implements IUserRepository {
@@ -88,5 +96,121 @@ implements IUserRepository {
 
             throw error;
         }
+
+    }
+
+    async findById(
+        id: string
+    ): Promise<UserRecord | null> {
+
+        const result = await this.db.query(
+            `
+            SELECT
+                id,
+                name,
+                email,
+                password_hash AS "passwordHash",
+                created_at AS "createdAt"
+            FROM users
+            WHERE id = $1
+            `,
+            [id]
+        );
+
+        return result.rows[0] ?? null;
+    }
+
+    async update(
+        id: string,
+        data: Partial<CreateUserData>
+    ): Promise<User | null> {
+        
+        const fields: string[] = [];
+        const values: unknown[] = [];
+        
+        if (data.name !== undefined) {
+            values.push(data.name);
+            fields.push(`name = $${values.length}`);
+        }
+        if (data.email !== undefined) {
+            values.push(data.email);
+            fields.push(`email = $${values.length}`);
+        }
+
+        if (fields.length === 0) {
+            return null;
+        }
+
+        try {
+            const result = await this.db.query(
+                `
+                UPDATE users
+                SET ${fields.join(', ')}
+                WHERE id = $${values.length + 1}
+                RETURNING
+                    id,
+                    name,
+                    email,
+                    created_at AS "createdAt"
+                `,
+                [...values, id]
+            );
+
+            return result.rows[0] ?? null;
+        } catch (error: unknown) {
+            throw error;
+
+        }
+    }
+
+    async delete(
+        id: string
+    ): Promise<boolean> {
+        const result = await this.db.query(
+            `
+            DELETE FROM users
+            WHERE id = $1
+            `,
+            [id]
+        );
+
+        return result.rowCount !== null && result.rowCount > 0;
+    }
+
+    async findAll(
+        params: PaginationParams
+    ): Promise<PaginationData<User>> {
+
+        //Get total data
+        const countResult = await this.db.query(
+            `
+            SELECT COUNT(*) AS total
+            FROM users
+            `
+        );
+
+        const totalItems = Number(
+            countResult.rows[0].total
+        );
+
+        //Get paginated data
+        const result = await this.db.query(
+            `
+            SELECT
+                id,
+                name,
+                email,
+                created_at AS "createdAt"
+            FROM users
+            ORDER BY created_at DESC, id DESC
+            LIMIT $1 
+            OFFSET $2
+            `,
+            [params.limit, params.offset]
+        );
+        return {
+            totalItems,
+            items: result.rows as User[]
+        };
     }
 }
